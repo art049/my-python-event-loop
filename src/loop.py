@@ -6,6 +6,7 @@ from contextvars import Context
 import time
 from typing import Any
 
+
 class MyEventLoop(AbstractEventLoop):
     def __init__(self):
         self._should_stop = False
@@ -13,13 +14,23 @@ class MyEventLoop(AbstractEventLoop):
         self._scheduled_handles = deque[TimerHandle]()
         self._ready_handles = deque[Handle]()
 
-
-    def call_soon(self, callback: Callable[..., object], *args: Any, context: Context | None = None) -> Handle:
+    def call_soon(
+        self,
+        callback: Callable[..., object],
+        *args: Any,
+        context: Context | None = None,
+    ) -> Handle:
         handle = Handle(callback, args, self, context)
         self._ready_handles.append(handle)
         return handle
 
-    def call_at(self, when: float, callback: Callable[..., object], *args: Any, context: Context | None = None) -> TimerHandle:
+    def call_at(
+        self,
+        when: float,
+        callback: Callable[..., object],
+        *args: Any,
+        context: Context | None = None,
+    ) -> TimerHandle:
         timer_handle = TimerHandle(
             when=when,
             callback=callback,
@@ -31,7 +42,13 @@ class MyEventLoop(AbstractEventLoop):
         timer_handle._scheduled = True
         return timer_handle
 
-    def call_later(self, delay: float, callback: Callable[..., object], *args: Any, context: Context | None = None) -> TimerHandle:
+    def call_later(
+        self,
+        delay: float,
+        callback: Callable[..., object],
+        *args: Any,
+        context: Context | None = None,
+    ) -> TimerHandle:
         return self.call_at(self.time() + delay, callback, *args, context=context)
 
     def time(self) -> float:
@@ -49,7 +66,10 @@ class MyEventLoop(AbstractEventLoop):
 
     def _run_once(self):
         now = self.time()
-        while len(self._scheduled_handles) > 0 and self._scheduled_handles[0].when() <= now:
+        while (
+            len(self._scheduled_handles) > 0
+            and self._scheduled_handles[0].when() <= now
+        ):
             handle = self._scheduled_handles.popleft()
             print(f"Adding handle {handle} to ready queue")
             self._ready_handles.append(handle)
@@ -69,7 +89,6 @@ class MyEventLoop(AbstractEventLoop):
         finally:
             self._running = False
 
-
     def is_running(self):
         return self._running
 
@@ -81,5 +100,5 @@ class MyEventLoop(AbstractEventLoop):
         # TODO: clear task queues and shutdown executor
 
     def get_debug(self) -> bool:
-        #FIXME: this should depend on the calls to set_debug and the PYTHONASYNCIODEBUG env var
+        # FIXME: this should depend on the calls to set_debug and the PYTHONASYNCIODEBUG env var
         return True
