@@ -1,7 +1,6 @@
 from loop import MyEventLoop
 import time
 
-
 t0 = time.time()
 loop = MyEventLoop()
 loop.call_soon(
