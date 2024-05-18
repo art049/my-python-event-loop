@@ -17,17 +17,17 @@ async def next_tick_future(loop: AbstractEventLoop | None = None):
     return await future
 
 
-async def sleep(seconds: float, loop: AbstractEventLoop | None = None):
+def sleep(seconds: float, loop: AbstractEventLoop | None = None):
     if seconds <= 0:
         # this should purely defer the future resolution to the next tick
-        return await next_tick_future(loop)
+        return next_tick_future(loop)
 
     if loop is None:
         loop = events.get_running_loop()
 
     future = loop.create_future()
     loop.call_later(seconds, future.set_result, None)
-    return await future
+    return future
 
 
 def gather(*futures: Future, loop: AbstractEventLoop | None = None):

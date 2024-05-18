@@ -17,6 +17,8 @@ anyio==4.3.0
 certifi==2024.2.2
     # via httpcore
     # via httpx
+cffi==1.16.0
+    # via pytest-codspeed
 click==8.1.7
     # via typer
     # via uvicorn
@@ -32,6 +34,8 @@ fastapi-cli==0.0.3
     # via fastapi
 fastui==0.6.0
     # via my-python-event-loop
+filelock==3.14.0
+    # via pytest-codspeed
 freezegun==1.5.0
 h11==0.14.0
     # via httpcore
@@ -75,6 +79,8 @@ pluggy==1.5.0
     # via pytest
 priority==2.0.0
     # via hypercorn
+pycparser==2.22
+    # via cffi
 pydantic==2.7.1
     # via fastapi
     # via fastui
@@ -83,6 +89,8 @@ pydantic-core==2.18.2
 pygments==2.18.0
     # via rich
 pytest==8.2.0
+    # via pytest-codspeed
+pytest-codspeed==2.2.1
 python-dateutil==2.9.0.post0
     # via freezegun
 python-dotenv==1.0.1
@@ -94,6 +102,8 @@ pyyaml==6.0.1
 rich==13.7.1
     # via typer
 ruff==0.4.2
+setuptools==69.5.1
+    # via pytest-codspeed
 shellingham==1.5.4
     # via typer
 six==1.16.0
