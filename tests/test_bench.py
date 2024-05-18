@@ -1,6 +1,7 @@
 from asyncio.unix_events import _UnixSelectorEventLoop
 import pytest
 
+from src.loop import MyEventLoop
 from src.my_asyncio import gather, next_tick_future, sleep
 
 
@@ -8,7 +9,7 @@ from src.my_asyncio import gather, next_tick_future, sleep
     scope="function",
 )
 def loop(request):
-    return _UnixSelectorEventLoop()
+    return MyEventLoop()
 
 
 def test_sleep_future(loop, benchmark):
