@@ -9,14 +9,19 @@ from asyncio import (
     futures,
     tasks,
 )
+from asyncio.log import logger
 import bisect
 from collections import deque
+import collections
 from collections.abc import Callable
+import collections.abc
 from contextvars import Context
 import errno
+import itertools
 import os
 import socket
 import stat
+import sys
 import time
 from typing import Any
 import selectors
@@ -91,6 +96,9 @@ class MyEventLoop(AbstractEventLoop):
             and self._scheduled_handles[0].when() <= now
         ):
             handle = self._scheduled_handles.popleft()
+            if handle.cancelled():
+                print(f"Skipping cancelled handle {handle}")
+                continue
             print(f"Adding handle {handle} to ready queue")
             self._ready_handles.append(handle)
 
@@ -167,7 +175,7 @@ class MyEventLoop(AbstractEventLoop):
         # Required when using sleep
         pass
 
-    def add_reader(self, fd, callback, *args) -> None:
+    def _add_reader(self, fd, callback, *args) -> None:
         """This implementation is mostly taken from the BaseSelectorEventLoop one"""
         print(f"Adding reader for fd {fd}")
         handle = Handle(callback, args, self)
@@ -182,8 +190,9 @@ class MyEventLoop(AbstractEventLoop):
             self._selector.modify(fd, mask | selectors.EVENT_READ, (handle, writer))
             if previous_handle is not None:
                 previous_handle.cancel()
+        return handle
 
-    def remove_reader(self, fd) -> bool:
+    def _remove_reader(self, fd) -> bool:
         """This implementation is mostly taken from the BaseSelectorEventLoop one
         This function should return True iff the file descriptor was monitored for reads.
         """
@@ -207,7 +216,7 @@ class MyEventLoop(AbstractEventLoop):
             return True
         return False
 
-    def add_writer(self, fd, callback, *args) -> None:
+    def _add_writer(self, fd, callback, *args) -> None:
         """This implementation is mostly taken from the BaseSelectorEventLoop one"""
         handle = Handle(callback, args, self)
         try:
@@ -221,8 +230,9 @@ class MyEventLoop(AbstractEventLoop):
             self._selector.modify(fd, mask | selectors.EVENT_WRITE, (reader, handle))
             if previous_handle is not None:
                 previous_handle.cancel()
+        return handle
 
-    def remove_writer(self, fd) -> bool:
+    def _remove_writer(self, fd) -> bool:
         """This implementation is mostly taken from the BaseSelectorEventLoop one
         This function should return True iff the file descriptor was monitored for writes.
         """
@@ -246,17 +256,17 @@ class MyEventLoop(AbstractEventLoop):
             return True
         return False
 
-    def _add_writer(self, fd, callback, *args):
-        self.add_writer(fd, callback, *args)
+    def add_writer(self, fd, callback, *args):
+        self._add_writer(fd, callback, *args)
 
-    def _remove_writer(self, fd):
-        self.remove_writer(fd)
+    def remove_writer(self, fd):
+        self._remove_writer(fd)
 
-    def _add_reader(self, fd, callback, *args):
-        self.add_reader(fd, callback, *args)
+    def add_reader(self, fd, callback, *args):
+        self._add_reader(fd, callback, *args)
 
-    def _remove_reader(self, fd):
-        self.remove_reader(fd)
+    def remove_reader(self, fd):
+        self._remove_reader(fd)
 
     def _process_selector_events(self, events: list[(selectors.SelectorKey, int)]):
         for key, mask in events:
@@ -271,6 +281,135 @@ class MyEventLoop(AbstractEventLoop):
                     self._remove_writer(fileobj)
                 else:
                     self._ready_handles.append(writer)
+
+    async def create_server(
+        self,
+        protocol_factory,
+        host=None,
+        port=None,
+        *,
+        family=socket.AF_UNSPEC,
+        flags=socket.AI_PASSIVE,
+        sock=None,
+        backlog=100,
+        ssl=None,
+        reuse_address=None,
+        reuse_port=None,
+    ):
+        """Mostly taken from the BaseEventLoop implementation"""
+        if isinstance(ssl, bool):
+            raise TypeError("ssl argument must be an SSLContext or None")
+
+        if host is not None or port is not None:
+            if sock is not None:
+                raise ValueError(
+                    "host/port and sock can not be specified at the same time"
+                )
+
+            if reuse_address is None:
+                reuse_address = os.name == "posix" and sys.platform != "cygwin"
+            sockets = []
+            if host == "":
+                hosts = [None]
+            elif isinstance(host, str) or not isinstance(
+                host, collections.abc.Iterable
+            ):
+                hosts = [host]
+            else:
+                hosts = host
+
+            fs = [
+                self._create_server_getaddrinfo(host, port, family=family, flags=flags)
+                for host in hosts
+            ]
+            infos = await tasks.gather(*fs)
+            infos = set(itertools.chain.from_iterable(infos))
+
+            completed = False
+            try:
+                for res in infos:
+                    af, socktype, proto, canonname, sa = res
+                    try:
+                        sock = socket.socket(af, socktype, proto)
+                    except socket.error:
+                        # Assume it's a bad family/type/protocol combination.
+                        if self._debug:
+                            logger.warning(
+                                "create_server() failed to create "
+                                "socket.socket(%r, %r, %r)",
+                                af,
+                                socktype,
+                                proto,
+                                exc_info=True,
+                            )
+                        continue
+                    sockets.append(sock)
+                    if reuse_address:
+                        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, True)
+
+                    # TODO: might be needed?
+                    # if reuse_port:
+                    #     _set_reuseport(sock)
+
+                    # Disable IPv4/IPv6 dual stack support (enabled by
+                    # default on Linux) which makes a single socket
+                    # listen on both address families.
+                    _HAS_IPv6 = hasattr(socket, "AF_INET6")
+                    if (
+                        _HAS_IPv6
+                        and af == socket.AF_INET6
+                        and hasattr(socket, "IPPROTO_IPV6")
+                    ):
+                        sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, True)
+                    try:
+                        sock.bind(sa)
+                    except OSError as err:
+                        msg = "error while attempting " "to bind on address %r: %s" % (
+                            sa,
+                            err.strerror.lower(),
+                        )
+                        if err.errno == errno.EADDRNOTAVAIL:
+                            # Assume the family is not enabled (bpo-30945)
+                            sockets.pop()
+                            sock.close()
+                            if self._debug:
+                                logger.warning(msg)
+                            continue
+                        raise OSError(err.errno, msg) from None
+
+                if not sockets:
+                    raise OSError(
+                        "could not bind on any address out of %r"
+                        % ([info[4] for info in infos],)
+                    )
+
+                completed = True
+            finally:
+                if not completed:
+                    for sock in sockets:
+                        sock.close()
+        else:
+            if sock is None:
+                raise ValueError("Neither host/port nor sock were specified")
+            if sock.type != socket.SOCK_STREAM:
+                raise ValueError(f"A Stream Socket was expected, got {sock!r}")
+            sockets = [sock]
+
+        for sock in sockets:
+            sock.setblocking(False)
+
+        server = MyServer(
+            self,
+            sockets,
+            protocol_factory,
+        )
+        server._start_serving()
+        # Skip one loop iteration so that all 'loop.add_reader'
+        # go through.
+        await tasks.sleep(0)
+
+        logger.info("%r is serving", server)
+        return server
 
     async def create_unix_server(
         self,

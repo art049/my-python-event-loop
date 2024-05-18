@@ -1,4 +1,4 @@
-from asyncio import AbstractEventLoop, events
+from asyncio import AbstractEventLoop, Future, events
 import types
 
 
@@ -30,9 +30,25 @@ async def sleep(seconds: float, loop: AbstractEventLoop | None = None):
     return await future
 
 
-async def gather(*futures, loop: AbstractEventLoop | None = None):
-    # This would be fun to implement and explain
-    ...
+def gather(*futures: Future, loop: AbstractEventLoop | None = None):
+    if loop is None:
+        loop = events.get_running_loop()
+
+    gathered = loop.create_future()
+
+    future_count = len(futures)
+    completed_count = 0
+
+    def on_done(future):
+        nonlocal completed_count
+        completed_count += 1
+        if completed_count == future_count:
+            gathered.set_result([future.result() for future in futures])
+
+    for future in futures:
+        future.add_done_callback(on_done)
+
+    return gathered
 
 
 async def wait():
